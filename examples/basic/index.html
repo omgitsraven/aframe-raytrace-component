@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>A-Frame Raytrace Component - Basic</title>
+    <meta name="description" content="Basic example for Raytrace component."></meta>
+    <script src="https://aframe.io/releases/0.6.0/aframe.min.js"></script>
+    <script src="../../dist/aframe-raytrace-component.min.js"></script>
+  </head>
+  <body>
+  
+  
+  
+  <script id="blob-fs" type="x-shader/x-fragment">
+      
+      precision mediump float;
+      
+      uniform float time;
+      varying vec3 localCameraPos;
+      varying vec3 localSurfacePos;
+      
+      const float blobsize = 0.2;
+      
+      
+      
+      float smoothBlend( float a, float b, float k ){
+          float h = clamp(0.5+0.5*(b-a)/k,0.0,1.0);
+          return mix(b,a,h) - k*h*(1.0-h);
+      }
+      
+      void hardAdd(inout float curD, float newD){
+        curD = min(curD,newD);
+      }
+      void smoothAdd(inout float curD, float newD, float blendPower){
+          curD = smoothBlend( newD, curD, blendPower );
+      }
+      
+      
+      float obj_ball(vec3 p, vec3 center, float radius){
+          return length(p-center)-radius;
+      }
+      
+      vec3 blobBallPos(float i){
+          
+          float v = time/1000.0*2.0 + i*100.0;
+          return vec3(
+            sin( v + sin(v*0.8) + sin(v*0.2)*sin(v*2.1) )*blobsize,
+            sin( v + sin(v*0.6) + sin(v*0.4)*sin(v*2.2) )*blobsize,
+            sin( v + sin(v*0.4) + sin(v*0.6)*sin(v*2.3) )*blobsize
+          );
+          
+      }
+      
+      float room(vec3 p){
+        
+        float distance = 9999.9;
+        
+        hardAdd(distance, obj_ball(p, blobBallPos(0.0), blobsize) );
+        for(float i=1.0; i<8.0; i+=1.0){
+          smoothAdd(distance, obj_ball(p, blobBallPos(i), blobsize) , blobsize);
+        }
+        
+        return distance;
+        
+      }
+      
+      
+      void main() {
+        
+        
+        vec3 curCameraRayUnit = normalize(localSurfacePos - localCameraPos);
+        
+        
+        // zero optimization done to step size, max iterations, etc..!
+        const vec3 e=vec3(0.02,0,0);
+        const float maxd=40.0; //Max depth
+        vec3 c,p,N;
+        float sA,sP;
+        
+        // march to bg
+        vec3 color=vec3(1.0,1.0,1.0);
+        float f=0.0;
+        float d=0.001;
+        vec3 surfaceColor;
+        for(int i=0;i<64;i++){
+          if ((abs(d) < .001) || (f > maxd)) break;
+          f+=d;
+          p=localCameraPos+curCameraRayUnit*f;
+          d = room(p);
+        }
+        
+        float specA=1.0, specP=8.0;
+        
+        if (f < maxd){
+          
+          vec3 n = vec3(d-room(p-e.xyy),
+                  d-room(p-e.yxy),
+                  d-room(p-e.yyx));
+          N = normalize(n);
+          
+          vec3 L = normalize(vec3(1.0,1.0,1.0)-p);
+          
+          float diffuse=max(dot(N,L),0.0);
+          vec3 H = normalize(L-curCameraRayUnit);
+          float specular = max(dot(H,N),0.0);
+          color = (diffuse*0.8+0.2)*vec3(1.0,0,1.0) + pow(specular,specP)*specA;
+          
+        } else {
+          
+          discard;
+          
+        }
+        
+        gl_FragColor = vec4(color,1.0);
+        
+      }
+      
+    </script>
+    
+    
+    
+    <script id="columns-fs" type="x-shader/x-fragment">
+      
+      precision mediump float;
+      
+      uniform float time;
+      varying vec3 localCameraPos;
+      varying vec3 localSurfacePos;
+      
+      
+      
+      
+      float obj_box(vec3 p, vec3 center, vec3 size, float roundness){
+          vec3 d = abs(p-center)-size;
+          return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0)) - roundness;
+      }
+      float obj_cylinder(vec3 p, vec3 center, vec2 size, float roundness){
+          vec3 tp = p-center;
+          vec2 d = abs(vec2(length(tp.xz),tp.y)) - size;
+          return min(max(d.x,d.y)+roundness,0.0) + length(max(d,0.0))-roundness;
+      }
+      float obj_planeX(vec3 p, float planeX){
+          return p.x-planeX;
+      }
+      float obj_planeY(vec3 p, float planeY){
+          return p.y-planeY;
+      }
+      float obj_planeZ(vec3 p, float planeZ){
+          return p.z-planeZ;
+      }
+      
+      float obj_cylForeverZ(vec2 p, float middleY, float radius){
+          return abs(length(vec2(p.x,p.y-middleY))) - radius;
+      }
+      
+      float distSmooth( float a, float b, float k ){
+          float h = clamp(0.5+0.5*(b-a)/k,0.0,1.0);
+          return mix(b,a,h) - k*h*(1.0-h);
+      }
+      
+      void hardAdd(inout float curD, inout int curMaterial, float newD, int newMaterial){
+          if (newD < curD) {
+              curD = newD;
+              curMaterial = newMaterial;
+          }
+      }
+      void hardSubtract(inout float curD, float newD) {
+          curD = max( -newD, curD );
+      }
+      void smoothAdd(inout float curD, float newD, float blendPower){//blend colors too?
+          curD = distSmooth( newD, curD, blendPower );
+      }
+      void smoothSubtract(inout float curD, float newD, float blendPower){
+          curD = -distSmooth( newD , -curD , blendPower );
+      }
+      
+      const float cylMidZ = -1.5;
+      
+      
+      
+      
+      float fwdDist = time/1000.0;
+      
+      
+      float middleMod(float val,float modDist){
+          return mod(val+modDist*0.5,modDist)-modDist*0.5;
+      }
+      
+      float room(vec3 p, out int material){
+        
+          float distance = 9999.9;
+          material = 0;
+          
+          const float pillarGapX = 2.5;
+          const float pillarGapZ = 0.5;
+          
+          const float floorTileGap = 0.5;
+          const float floorTileGrout = 0.07;
+          
+          const float ceilY = 9.0;
+          
+          const float mirrorY = 0.5;
+          
+          vec3 pillarP = vec3(mod(p.x,pillarGapX*2.0),-abs(p.y-mirrorY)+mirrorY,mod(p.z,pillarGapZ*2.0));
+          
+          // ceiling flat
+          hardAdd(distance,material,
+                  -obj_planeY(p ,ceilY),
+                  3);
+          
+          // ceiling groove
+          hardSubtract(distance,
+                       obj_cylForeverZ(vec2(middleMod(p.x,5.0),p.y),ceilY,2.3));
+          
+          // base
+          hardAdd(distance,material,
+                  obj_box(pillarP,vec3(pillarGapX,-1.4,pillarGapZ),vec3(0.4,0.15,0.4),0.0),
+                  1);
+          
+          // base blend
+          smoothAdd(distance,
+                    obj_cylinder(pillarP,vec3(pillarGapX,-1.15,pillarGapZ),vec2(0.3,0.1),0.0),
+                    0.11);
+          
+          // floor
+          hardAdd(distance,material,
+                  obj_box(vec3(mod(p.x,floorTileGap*2.0),p.y,mod(p.z,floorTileGap*2.0)),vec3(floorTileGap,-1.5-floorTileGap,floorTileGap),vec3(floorTileGap-floorTileGrout),floorTileGrout),
+                  2);
+          
+          //column
+          hardAdd(distance,material,
+                  obj_cylinder(pillarP,vec3(pillarGapX,mirrorY,pillarGapZ),vec2(0.25,2.0),0.0),
+                  1);
+          
+          return distance;
+          
+      }
+      
+      
+      void main(){
+        
+        const vec3 e=vec3(0.00007,0,0);
+        const float maxd=40.0; //Max depth
+        vec3 p;
+        
+        
+        vec3 curCameraRayUnit = normalize(localSurfacePos - localCameraPos);
+        
+        
+        
+        float f=0.0;
+        float d=0.01;
+        int surfaceMaterial = 0;
+        for(int i=0;i<96;i++){
+            if ((abs(d) < .001) || (f > maxd)) break;
+            f+=d;
+            p=vec3(0,0,-fwdDist)+localCameraPos+curCameraRayUnit*f;
+            d = room(p,surfaceMaterial);
+        }
+
+
+        vec3 color;
+        int dummyMaterial;
+
+        if (f < maxd){
+
+            vec3 surfaceColor;
+            float specA, specP;
+            float difP = 1.0;
+            vec3 normalCheat = vec3(0.0,0.0,0.0);//generally not advisable in stereo, but it's used very shallowly here
+
+            if (surfaceMaterial == 1){
+
+                vec3 marbleP = p;
+
+                marbleP.x += sin(p.y*20.0)*0.12;
+                marbleP.z += sin(p.y*22.0)*0.1;
+                marbleP.y += sin(p.x*25.0)*0.13;
+                marbleP.y += sin(p.z*23.0)*0.14;
+
+                marbleP.y += sin(p.x*1.3)*0.5;
+                marbleP.y += sin(p.z*1.5)*0.6;
+
+                marbleP.x += sin(p.y*150.0)*0.011;
+                marbleP.z += sin(p.y*162.0)*0.013;
+                marbleP.y += sin(p.x*145.0)*0.012;
+                marbleP.y += sin(p.z*153.0)*0.015;
+
+                marbleP.x *= 20.0;
+                marbleP.z *= 20.0;
+                marbleP.y *= 10.0;
+
+                float marbleAmtA = abs(sin(marbleP.x)+sin(marbleP.y)+sin(marbleP.z))/3.0;
+                marbleAmtA = pow(1.0-marbleAmtA,5.0);
+
+                marbleP = p;
+
+                marbleP.x += sin(p.y*21.0)*0.12;
+                marbleP.z += sin(p.y*23.0)*0.1;
+                marbleP.y += sin(p.x*22.0)*0.13;
+                marbleP.y += sin(p.z*24.0)*0.14;
+
+                marbleP.y += sin(p.x*1.2)*0.5;
+                marbleP.y += sin(p.z*1.4)*0.6;
+
+                marbleP.x += sin(p.y*150.0)*0.011;
+                marbleP.z += sin(p.y*162.0)*0.013;
+                marbleP.y += sin(p.x*145.0)*0.012;
+                marbleP.y += sin(p.z*153.0)*0.015;
+
+                marbleP.x *= 22.0;
+                marbleP.z *= 23.0;
+                marbleP.y *= 11.0;
+
+                float marbleAmtB = abs(sin(marbleP.x)+sin(marbleP.y)+sin(marbleP.z))/3.0;
+                marbleAmtB = pow(1.0-marbleAmtB,9.0);
+                marbleAmtB = 1.0-(1.0-marbleAmtB*0.3);
+
+                float marbleAmt = marbleAmtA + marbleAmtB;
+                marbleAmt = clamp(marbleAmt,0.0,1.0);
+
+                surfaceColor = mix(vec3(0.0,0.8,0.5),vec3(0.70),marbleAmt);
+                specA = mix(1.0,0.8,marbleAmt);
+                specP = mix(16.0,28.0,marbleAmt);
+
+            }
+            if (surfaceMaterial == 2) {
+
+                vec3 marbleP = p;
+                vec3 intensityP = p;
+
+                float tileSize = 1.0;
+                if ( ceil(mod(p.x,tileSize*2.0)/tileSize) == ceil(mod(p.z,tileSize*2.0)/tileSize) ) {
+                    surfaceColor = vec3(0.45,0.0,0.0);
+                    marbleP.x *= -1.0;
+                    intensityP.x *= -1.0;
+                    marbleP.z += 1.0;
+                    intensityP.z += 1.0;
+                } else {
+                    surfaceColor = vec3(0.75,0.75,0.6);
+                }
+                specA = 1.0;
+                specP = 16.0;
+
+
+
+
+                marbleP.x += marbleP.z*0.5;
+                marbleP.z += marbleP.x*0.4;
+
+                marbleP.x += sin(marbleP.x*  3.8)*0.125;
+                marbleP.z += sin(marbleP.z*  3.6)*0.135;
+
+                marbleP.x += sin(marbleP.z* 20.0)*0.025;
+                marbleP.z += sin(marbleP.x* 25.0)*0.025;
+
+                marbleP.x += sin(marbleP.z* 40.0)*0.025;
+                marbleP.z += sin(marbleP.x* 45.0)*0.025;
+
+                marbleP.x += sin(marbleP.z*150.0)*0.01;
+                marbleP.z += sin(marbleP.x*160.0)*0.011;
+
+                marbleP *= 36.0;
+
+
+
+
+                intensityP.z -= 10000.0;
+
+                intensityP.x += intensityP.z*0.3;
+                intensityP.z += intensityP.x*0.1;
+
+                intensityP.x += sin(intensityP.x*1.2)*0.36;
+                intensityP.z += sin(intensityP.z*1.3)*0.21;
+
+                intensityP.x += sin(intensityP.z*2.2)*0.8;
+                intensityP.z += sin(intensityP.x*2.3)*0.9;
+
+                intensityP *= 6.0;
+
+
+                float intensityAmt = (sin(intensityP.x)*sin(intensityP.z))*0.5+0.5;
+                intensityAmt = 1.0-pow(1.0-intensityAmt,0.5);
+
+                float marbleAmt = (sin(marbleP.x)*sin(marbleP.z))*0.5+0.5;
+
+
+                float marbleGrainAmt = marbleAmt;
+                marbleGrainAmt = 1.0-((1.0-pow(marbleGrainAmt,1.5))*(1.0-intensityAmt)*1.125);
+                marbleGrainAmt = 1.0-pow(1.0-marbleGrainAmt,5.0);
+
+                surfaceColor *= marbleGrainAmt;
+                specA *= marbleGrainAmt;
+
+
+
+                float marbleGashAmt = marbleAmt;
+                marbleGashAmt *= 0.5 + 18.0*intensityAmt;
+                marbleGashAmt += pow(intensityAmt,2.5)*18.0;
+                marbleGashAmt = clamp(marbleGashAmt,0.0,1.0);
+
+                float marbleGoldAmt = pow(marbleGashAmt,1.0);
+                float marbleShadeAmt = pow(marbleGashAmt,16.0);
+
+                surfaceColor *= marbleShadeAmt;
+                specA *= marbleShadeAmt;
+
+                vec3 myNormalCheat = vec3(
+                    sin( p.x*200.0 + sin(p.z*100.0)*0.5 + sin(p.z*17.0)*(5.0+sin(p.x*20.0)*4.0) )*0.000015,
+                    0.0,
+                    0.0
+                );
+
+                surfaceColor = mix(vec3(1.0,0.9,0.0),surfaceColor,marbleGoldAmt);
+                specP = mix(256.0,specP,marbleGoldAmt);
+                specA = mix(1.0,specA,marbleGoldAmt);
+                difP = mix(6.0,difP,marbleGoldAmt);
+                normalCheat = mix(myNormalCheat,normalCheat,marbleGoldAmt);
+
+            }
+            if (surfaceMaterial == 3){
+
+                float splinters =
+                    pow(abs( ( sin(p.x*100.0)*0.5 + sin(p.y*100.0)*0.5 ) ), 0.1)
+                    *
+                    (sin(p.z*2.0+sin(p.x*10.0)*4.0+sin(p.x*27.0)*3.0)*0.5+0.5);
+
+                float waves = sin(
+                    p.z*10.0 +
+                    sin(p.z*3.0 + sin(p.x*11.0)*0.5 )*1.0 +
+                    sin((p.z + sin(p.z*0.5)*5.5)*0.15 + sin(p.x*0.8)*2.0) * 14.0 +
+                    pow(abs(sin((p.x*1.0 + sin(p.x*3.0)*0.5)*25.0)),0.5) * 0.5
+                );
+
+                float grain = splinters * 0.3 + waves * 0.7;
+                grain = pow(grain*0.5+0.5,0.25);
+
+                surfaceColor = mix(vec3(0.2,0.1,0.1),vec3(0.4,0.2,0.05),grain);
+                specP = mix(30.0,20.0,grain);
+                specA = grain;
+
+            }
+
+            vec3 n = vec3(d-room(p-e.xyy,dummyMaterial),
+                          d-room(p-e.yxy,dummyMaterial),
+                          d-room(p-e.yyx,dummyMaterial));
+            n += normalCheat;
+            vec3 N = normalize(n);
+
+            vec3 pointLightPos = vec3(0.0,2.0,-4.5-fwdDist);
+            vec3 L = normalize(pointLightPos-p);
+
+            float diffuse=max(dot(N,L),0.0);
+            vec3 H = normalize(L-curCameraRayUnit);
+            float specular = max(dot(H,N),0.0);
+            color = pow(diffuse,difP)*surfaceColor + pow(specular,specP)*specA;
+
+            float lightDist = (length(pointLightPos-p)) * 0.04;
+            lightDist = max(0.0,min(1.0,lightDist));
+            color *= pow(1.0-lightDist, 2.0);
+
+        } else {
+
+            color = vec3(0.0,0.0,0.0);
+
+        }
+
+
+
+        gl_FragColor = vec4(color,1.0);
+        
+      }
+      
+    </script>
+    
+    <script id="smoke-fs" type="x-shader/x-fragment">
+      
+      precision mediump float;
+      
+      uniform float time;
+      varying vec3 localCameraPos;
+      varying vec3 localSurfacePos;
+      
+      const float pi2 = 3.14152*2.0;
+      
+      vec4 field(vec3 p){
+        
+        vec3 morphedP = vec3(
+            p.x*20.0 + time/200.0
+            + sin(p.z*5.0)*(1.0+sin(time/1100.0)*0.5)*10.0
+            + sin(p.y*4.0)*(1.0+sin(time/1300.0)*0.5)*10.0
+          ,
+            p.y*20.0 + time/300.0
+            + sin(p.z*5.0)*(1.0+sin(time/1000.0)*0.5)*10.0
+            + sin(p.x*4.0)*(1.0+sin(time/1200.0)*0.5)*10.0
+          ,
+            p.z*20.0 + time/400.0
+            + sin(p.x*5.0)*(1.0+sin(time/1400.0)*0.5)*10.0
+            + sin(p.y*4.0)*(1.0+sin(time/1500.0)*0.5)*10.0
+        );
+        
+        float alpha = (sin(morphedP.x)*0.5+0.5) * (sin(morphedP.y)*0.5+0.5) * (sin(morphedP.z)*0.5+0.5);
+        vec3 color = vec3(
+          sin(morphedP.x),
+          sin(morphedP.y),
+          sin(morphedP.z)
+        );
+        color = (color*0.5+0.5)*alpha;
+        
+        return vec4(color,alpha);
+      }
+      
+      
+      float fadeCurve(float x){
+        return 1.0-pow(abs(x)/0.5,2.0);
+      }
+      
+      void alphaBlend(inout vec4 baseCol, vec4 newCol){
+        baseCol = baseCol*(1.0-newCol.a) + newCol;
+      }
+      
+      float noise(vec3 p){
+        return sin(
+          p.x*12345678.0 + p.y*45678912.0 + p.z*78912345.0 +
+          sin(p.x+p.y+time/1000.0)*14725836.0 + sin(p.y+p.z+time/1000.0)*25836914.0 + sin(p.z+p.x+time/1000.0)*36914725.0
+        );
+      }
+      
+      void main(){
+        
+        vec3 rayPos = localSurfacePos;
+        vec3 rayDir = normalize(localCameraPos-localSurfacePos);//BACKWARDS because we're painting inside & doing painter's algorithm!
+        vec4 fog = vec4(0.0);
+        for(int i=0; i<200; i++){
+          rayPos += rayDir*0.01;
+          if (max(max(abs(rayPos.x),abs(rayPos.y)),abs(rayPos.z)) > 0.51) break;
+          float squareFade = fadeCurve(rayPos.x)*fadeCurve(rayPos.y)*fadeCurve(rayPos.z);
+          vec4 fogSamp = field(rayPos);//+rayDir*0.005*noise(rayPos));
+          alphaBlend(fog,fogSamp*squareFade);
+        }
+        
+        gl_FragColor = fog;
+        
+      }
+      
+    </script>
+  
+  
+  
+  
+  
+    <a-scene stats>
+      <a-assets>
+        <img id="groundTexture" src="https://cdn.aframe.io/a-painter/images/floor.jpg">
+        <img id="skyTexture" src="https://cdn.aframe.io/a-painter/images/sky.jpg">
+      </a-assets>
+      
+      <a-entity position="0 0 -1">
+        <a-box position="0 1.65 0" scale="0.5 0.5 0.5" raytrace="shader:#blob-fs; backside:true;"></a-box>
+        <a-cylinder radius="0.03" height="2.7" color="#345" segments-height="1" segments-radial="8"></a-cylinder>
+        <a-cylinder position="0 1.38 0" radius="0.3" height="0.03" color="#345" segments-height="1" segments-radial="48"></a-cylinder>
+      </a-entity>
+      
+      <a-entity position="1 0 0" rotation="0 -90 0">
+        <a-torus position="0 1.65 0" color="#345" radius="0.5" radius-tubular="0.005" segments-tubular="64" segments-radial="6">
+          <a-circle radius="0.5" segments="16" raytrace="shader:#columns-fs"></a-circle>
+        </a-torus>
+        <a-cylinder position="0 0 0" radius="0.01" height="2.3" color="#345" segments-height="1" segments-radial="6"></a-cylinder>
+      </a-entity>
+      
+      <a-entity position="-1 0 0" rotation="0 90 0">
+        <a-box position="0 1.65 0" scale="0.5 0.5 0.5" raytrace="shader:#smoke-fs; transparent:true; backside:true;"></a-box>
+        <a-box scale="0.5 2.75 0.5" color="#345"></a-box>
+      </a-entity>
+      
+      
+      <a-light type="ambient" color="#445451"></a-light>
+      <a-light type="point" intensity="2" position="2 4 4"></a-light>
+      <a-sky height="2048" radius="30" src="#skyTexture" theta-length="90" width="2048" segments-height="5" segments-width="8"></a-sky>
+      <a-plane src="#groundTexture" rotation="-90 0 0" height="100" width="100"></a-plane>
+      
+    </a-scene>
+
+    <!-- GitHub Corner. -->
+    <a href="https://github.com/omgitsraven/aframe-raytrace-component" class="github-corner">
+      <svg width="80" height="80" viewBox="0 0 250 250" style="fill:#222; color:#fff; position: absolute; top: 0; border: 0; right: 0;">
+        <path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path>
+      </svg>
+    </a>
+    <style>.github-corner:hover .octo-arm{animation:octocat-wave 560ms ease-in-out}@keyframes octocat-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-25deg)}40%,80%{transform:rotate(10deg)}}@media (max-width:500px){.github-corner:hover .octo-arm{animation:none}.github-corner .octo-arm{animation:octocat-wave 560ms ease-in-out}}
+    <!-- End GitHub Corner. -->
+  </body>
+</html>
