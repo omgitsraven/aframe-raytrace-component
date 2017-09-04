@@ -5,6 +5,8 @@
 
 An [A-Frame](https://aframe.io) component for placing raytraced surfaces in a scene.
 
+![blob](https://user-images.githubusercontent.com/8540042/30010500-267a6ea0-90fe-11e7-8a9c-8fb5295d1b9f.gif)
+
 ### API
 
 | Property | Description | Default Value |
