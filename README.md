@@ -32,7 +32,7 @@ Install and use by directly including the [browser files](dist):
   
   <script id="foo-fs" type="x-shader/x-fragment">
     uniform float time;
-    varying vec3 localCameraPos;
+    uniform vec3 localCameraPos;
     varying vec3 localSurfacePos;
     
     void main(){
