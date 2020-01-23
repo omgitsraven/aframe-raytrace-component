@@ -26,7 +26,7 @@ Install and use by directly including the [browser files](dist):
 ```html
 <head>
   <title>My A-Frame Scene</title>
-  <script src="https://aframe.io/releases/0.6.0/aframe.min.js"></script>
+  <script src="https://aframe.io/releases/1.0.3/aframe.min.js"></script>
   <script src="https://unpkg.com/aframe-raytrace-component/dist/aframe-raytrace-component.min.js"></script>
 </head>
 
