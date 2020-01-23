@@ -58,7 +58,7 @@
 		
 		init: function () {
 			
-			this.myMesh = this.el.getOrCreateObject3D('mesh');
+			this.myMesh = this.el.getObject3D('mesh');
 			this.myShaderMaterial = new THREE.ShaderMaterial({
 				
 				vertexShader:
@@ -80,9 +80,7 @@
 			var self = this;
 			this.myMesh.onBeforeRender = function(renderer,scene,camera,geometry,material,group){
 				
-				self.myShaderMaterial.uniforms.time.value = performance.now();
-				
-				camera.getWorldPosition(self.myShaderMaterial.uniforms.localCameraPos.value);
+				self.myShaderMaterial.uniforms.localCameraPos.value.setFromMatrixPosition(camera.matrixWorld);
 				self.myMesh.worldToLocal(self.myShaderMaterial.uniforms.localCameraPos.value);
 				
 			};
@@ -95,6 +93,9 @@
 			this.myShaderMaterial.fragmentShader = this.data.shader.textContent;
 			this.myShaderMaterial.side = this.data.backside?THREE.BackSide:THREE.FrontSide;
 			this.myShaderMaterial.transparent = this.data.transparent;
+		},
+		tick: function(time,timeDelta){
+			this.myShaderMaterial.uniforms.time.value = time;
 		}
 	});
 
